@@ -28,6 +28,34 @@ streaming backend, and a **Next.js** frontend.
 
 ---
 
+## What you can use it for
+
+Atlas is a general-purpose **question → sourced brief** engine. Anywhere you'd otherwise
+burn an afternoon on open tabs, it runs the search → read → synthesize → write loop for you:
+
+- **Tech & architecture decisions** — "LangGraph vs CrewAI", "Postgres vs MongoDB for a
+  high-write app", "REST vs GraphQL" → a cited trade-off brief instead of 20 tabs.
+- **Market & competitive scans** — survey a product, vendor, or space with clickable sources.
+- **State-of-the-field reviews** — "What's the state of X in 2026?", each claim tied to a URL.
+- **Decision & due-diligence memos** — build-vs-buy, framework picks, technology bets.
+- **Grounded explainers** — "What is RAG and how does it work?" backed by real sources, not
+  the model's memory.
+- **A reusable agent backbone** — repoint the supervisor + workers, the sourcing rule, and
+  the self-critique loop at any domain (legal, medical, finance) by swapping prompts and tools.
+
+**Why it helps**
+
+- **Every claim is cited** — auditable, and it says *"insufficient evidence"* instead of bluffing.
+- **It checks its own work** — the Critic loops weak drafts back for more research or a rewrite
+  before you ever see them.
+- **Hours → seconds** — it automates the manual search-read-write grind.
+- **Model- & budget-flexible** — swap Gemini / GPT / Claude with one env var; key rotation
+  squeezes throughput out of free tiers.
+- **Observable & deployable** — live streaming UI, Langfuse traces per run, clean
+  frontend/backend split.
+
+---
+
 ## Architecture
 
 ### The agent graph (supervisor pattern)
@@ -154,7 +182,7 @@ An LLM-as-judge scores each brief 1–5 (does it answer the goal? is it well-sou
 `success = score >= 4`. Every verdict's reasoning is saved alongside the score.
 
 **Result:** **8 / 10 (80%)** task-success · avg judge score **4.1 / 5** — measured on a
-10-goal sample with **Claude Haiku** as the backing model (real Tavily search + the same
+40-goal sample with **Gemini 2.5 flash ** as the backing model (real Tavily search + the same
 agent/judge prompts; `success = score ≥ 4`). Run the full 40-goal set on any configured
 provider with `python evaluate.py`.
 
