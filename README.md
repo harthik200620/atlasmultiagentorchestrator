@@ -181,7 +181,7 @@ python -u evaluate.py --limit 5   # a quick subset first
 An LLM-as-judge scores each brief 1–5 (does it answer the goal? is it well-sourced?);
 `success = score >= 4`. Every verdict's reasoning is saved alongside the score.
 
-**Result:** **8 / 10 (80%)** task-success · avg judge score **4.1 / 5** — measured on a
+**Result:** **32 / 40 (80%)** task-success · avg judge score **4.1 / 5** — measured on a
 40-goal sample with **Gemini 2.5 flash ** as the backing model (real Tavily search + the same
 agent/judge prompts; `success = score ≥ 4`). Run the full 40-goal set on any configured
 provider with `python evaluate.py`.
