@@ -22,5 +22,5 @@ Thumbs.db
 # --- Streamlit secrets (Phase 6) ---
 .streamlit/secrets.toml
 
-# --- Local run outputs (uncomment to ignore large eval dumps) ---
-# results/
+# --- Local run outputs (eval dumps get large; put your headline number in README) ---
+results/

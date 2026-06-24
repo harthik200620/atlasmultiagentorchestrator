@@ -89,18 +89,19 @@ def _stream(graph, init_state: AtlasState, cfg: dict, verbose: bool) -> AtlasSta
     return final_state
 
 
-def run(goal: str, verbose: bool = True) -> AtlasState:
-    """Run Atlas on a goal. If Langfuse is configured, the whole run is captured
-    as one named trace and the trace URL is printed."""
+def run(goal: str, verbose: bool = True, trace: bool = True) -> AtlasState:
+    """Run Atlas on a goal. If Langfuse is configured AND trace=True, the whole
+    run is captured as one named trace and the trace URL is printed. The eval
+    passes trace=False (it doesn't need traces and they add export overhead)."""
     graph = build_graph()
     init_state = new_state(goal)
     cfg: dict = {"recursion_limit": RECURSION_LIMIT}
 
-    handler = tracing.callback_handler()
+    handler = tracing.callback_handler() if trace else None
     if handler is not None:
         cfg["callbacks"] = [handler]
 
-    client = tracing.langfuse_client()
+    client = tracing.langfuse_client() if trace else None
     if client is None:
         # Tracing off — just run.
         return _stream(graph, init_state, cfg, verbose)
