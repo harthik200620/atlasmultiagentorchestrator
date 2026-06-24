@@ -1,12 +1,9 @@
 """
-eval_goals.py — the 40-goal test set Atlas is scored against.
+eval_goals.py - the 40-goal test set Atlas is scored against.
 
-Deliberately VARIED so the score reflects general research ability, not just one
-kind of question: comparisons, definitions, how-it-works, tradeoffs, recent-state
-(2026), and specific factual lookups, across several domains (AI, software,
-science, health, energy, economics, history).
-
-Edit / extend freely — evaluate.py just reads this list.
+Varied on purpose so the score reflects general research ability rather than one
+kind of question: comparisons, definitions, how-it-works, tradeoffs, recent state
+(2026), and specific factual lookups across several domains.
 """
 
 GOALS = [

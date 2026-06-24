@@ -1,16 +1,8 @@
 """
-config.py — one central place for all of Atlas's configuration.
+config.py - central configuration for Atlas.
 
-Anything that depends on the environment (which LLM to use, API keys, behavior
-knobs) is read HERE, once. The rest of the code imports from this file and never
-touches os.environ directly.
-
-    import config
-    llm = config.get_llm()          # a ready-to-use chat model (with key rotation)
-
-Command-line helpers:
-    python config.py                # show config + which keys are present
-    python config.py check-keys     # make ONE real Gemini + Tavily call to test
+All environment-dependent settings (LLM choice, API keys, behavior knobs) are
+read here once; the rest of the code imports from this module.
 """
 
 from __future__ import annotations
@@ -25,22 +17,20 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load atlas/.env (next to this file) so Atlas works no matter what directory
-# you launch from. Real OS env vars still take precedence (handy in deployment,
-# where you set vars instead of shipping a .env file).
+# Load atlas/.env next to this file so launch directory doesn't matter. Real OS
+# env vars still take precedence.
 load_dotenv(Path(__file__).with_name(".env"))
 
 
 # ----------------------------------------------------------------------
-# LLM selection  (swap providers by editing .env, not code)
+# LLM selection
 # ----------------------------------------------------------------------
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "google").lower()
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 
-# Gemini 2.5 flash models support a "thinking" phase that is ON by default and
-# adds large per-call latency. 0 disables it (huge speedup; what we want for a
-# many-call research pipeline). Ignored for non-2.5 / pro models.
+# Gemini 2.5 flash defaults to a "thinking" pass that adds large per-call
+# latency; 0 disables it for this many-call pipeline. Ignored on non-2.5/pro.
 GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
 
 
@@ -58,25 +48,22 @@ LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
 
 # ----------------------------------------------------------------------
-# Atlas behavior knobs
+# Behavior knobs
 # ----------------------------------------------------------------------
 # Max Critic revise-rounds before Atlas accepts the current draft.
 MAX_ITERATIONS = int(os.getenv("ATLAS_MAX_ITERATIONS", "2"))
-# How many results the Searcher asks Tavily for per query.
 TAVILY_MAX_RESULTS = int(os.getenv("TAVILY_MAX_RESULTS", "5"))
 
 
 # ----------------------------------------------------------------------
-# Gemini API key pool  (rotation across many free-tier keys)
+# Gemini API key pool
 # ----------------------------------------------------------------------
 def gemini_keys() -> list[str]:
     """Collect every Gemini/Google API key from the environment.
 
     Picks up GOOGLE_API_KEY plus any numbered pool keys such as
-    GEMINI_API_KEY_4 or GOOGLE_API_KEY_2 (any number, any order). Atlas
-    round-robins across all of them and fails over to the next when one hits its
-    free-tier rate limit. Use keys from DIFFERENT Google projects — keys in the
-    same project share one quota.
+    GEMINI_API_KEY_4 or GOOGLE_API_KEY_2. Keys should come from different Google
+    projects, since keys in the same project share one quota.
     """
     found: list[tuple[int, str]] = []
     if GOOGLE_API_KEY:
@@ -99,9 +86,8 @@ def gemini_keys() -> list[str]:
 
 
 def _is_rate_limit(err: Exception) -> bool:
-    """True if the error means 'this key is temporarily tapped out' — an HTTP
-    429 quota error, or a transient 503 — as opposed to a real bug (bad key,
-    bad request) that we should NOT hide behind a rotation."""
+    """True for a transient throttle (429 quota, 503) that warrants rotating to
+    the next key, as opposed to a real error (bad key, bad request)."""
     text = f"{type(err).__name__}: {err}".lower()
     signals = (
         "429", "resource_exhausted", "resourceexhausted", "rate limit",
@@ -111,27 +97,22 @@ def _is_rate_limit(err: Exception) -> bool:
     return any(s in text for s in signals)
 
 
-# We subclass LangChain's Runnable so this object behaves like a real chat model
-# everywhere in Atlas — agents can .invoke() it, pipe it with `|`, and (Phase 4)
-# pass Langfuse callbacks through `config`, all transparently.
-from langchain_core.runnables import Runnable  # noqa: E402  (after stdlib block)
+# Subclassing Runnable lets this behave like a chat model everywhere agents use
+# it: .invoke(), the `|` pipe, and passing callbacks through `config`.
+from langchain_core.runnables import Runnable  # noqa: E402
 
 
 class RotatingGemini(Runnable):
-    """A chat model that spreads calls across a POOL of Gemini API keys.
+    """A chat model that spreads calls across a pool of Gemini API keys.
 
-    WHY: free-tier Gemini keys have low per-minute/day limits. Holding several
-    keys (ideally from different Google projects) and rotating multiplies
-    throughput and keeps Atlas running when any single key is throttled.
-
-    HOW:
-      * round-robin  - each .invoke() starts on the NEXT key in the pool;
-      * failover     - on a 429/quota error it retries on the following keys;
-      * patient      - if EVERY key is throttled in one pass, it waits and
-                       retries the whole rotation (per-minute windows recover),
-                       so an unattended eval survives bursts;
-      * transparent  - forwards .invoke / .ainvoke and proxies .bind_tools /
-                       .with_structured_output, so agents treat it like any LLM.
+    Free-tier keys have low per-minute/day limits, so holding several and
+    rotating raises throughput and keeps running when one key is throttled:
+      * round-robin - each .invoke() starts on the next key in the pool;
+      * failover    - on a 429/quota error it retries on the following keys;
+      * patient     - if every key is throttled in one pass, it waits and
+                      retries the whole rotation once per-minute windows recover;
+      * transparent - forwards .invoke / .ainvoke and proxies .bind_tools /
+                      .with_structured_output.
     """
 
     def __init__(self, pool: list, max_retries: int = 2, retry_wait: int = 15):
@@ -143,26 +124,24 @@ class RotatingGemini(Runnable):
         self._pool = pool
         self._n = len(pool)
         self._cycle = itertools.cycle(range(self._n))
-        self._lock = threading.Lock()  # round-robin must be thread-safe
+        self._lock = threading.Lock()  # guards the round-robin cursor
         self._max_retries = max_retries
         self._retry_wait = retry_wait
 
     @classmethod
     def from_keys(cls, keys: list[str], model: str, temperature: float):
-        """Build one ChatGoogleGenerativeAI client per key (no network yet)."""
+        """Build one ChatGoogleGenerativeAI client per key."""
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         extra = {}
         m = model.lower()
-        # 2.5 flash models can disable 'thinking' for a big latency win.
-        # (2.5-pro can't disable it; non-2.5 models don't have it.)
+        # Only 2.5 flash models support disabling 'thinking'.
         if "gemini-2.5" in m and "pro" not in m:
             extra["thinking_budget"] = GEMINI_THINKING_BUDGET
 
         clients = [
-            # max_retries=0 is critical: OUR rotation handles failover, so a
-            # throttled key fails FAST to the next key instead of LangChain
-            # backing off ~60s on the same throttled key first.
+            # max_retries=0 so a throttled key fails over immediately to the
+            # next key, instead of LangChain backing off ~60s on the same one.
             ChatGoogleGenerativeAI(
                 model=model,
                 temperature=temperature,
@@ -189,9 +168,9 @@ class RotatingGemini(Runnable):
                 except Exception as err:  # noqa: BLE001
                     if _is_rate_limit(err):
                         last_err = err
-                        continue  # this key is throttled — try the next one
-                    raise         # a real error — surface it, don't mask it
-            # Every key was rate-limited this pass — wait for a per-minute window.
+                        continue  # throttled key, try the next one
+                    raise
+            # Every key was throttled this pass; wait for a per-minute window.
             if attempt < self._max_retries:
                 wait = self._retry_wait * (attempt + 1)
                 print(f"[llm] all {self._n} keys rate-limited; waiting {wait}s then retrying...")
@@ -228,7 +207,7 @@ class RotatingGemini(Runnable):
 
 
 # ----------------------------------------------------------------------
-# LLM factory  — every agent gets its model from here
+# LLM factory
 # ----------------------------------------------------------------------
 _LLM_CACHE: dict = {}
 
@@ -257,9 +236,8 @@ def _build_llm(model: str, temperature: float):
 def get_llm(model: str | None = None, temperature: float | None = None):
     """Return the chat model Atlas should use, based on LLM_PROVIDER.
 
-    The model is built ONCE and cached, so the rotating key-pool's round-robin
-    index persists across every agent call and every eval run. Provider SDKs are
-    imported lazily.
+    The model is built once and cached so the rotating pool's round-robin index
+    persists across calls. Provider SDKs are imported lazily.
     """
     cache_key = (
         model or LLM_MODEL,
@@ -274,7 +252,7 @@ def get_llm(model: str | None = None, temperature: float | None = None):
 # Self-checks
 # ----------------------------------------------------------------------
 def _status(value: str | None) -> str:
-    """Report whether a secret is present WITHOUT printing the secret itself."""
+    """Report whether a secret is present without printing the secret itself."""
     return f"set ({len(value)} chars)" if value else "MISSING"
 
 
@@ -299,7 +277,7 @@ def check() -> None:
 
     ready = True
     if LLM_PROVIDER == "google" and not pool:
-        print("!  No Gemini keys. Add GEMINI_API_KEY_<n> to .env before Phase 1.")
+        print("!  No Gemini keys. Add GEMINI_API_KEY_<n> to .env.")
         ready = False
     if not TAVILY_API_KEY:
         print("!  TAVILY_API_KEY missing. The Searcher needs it.")

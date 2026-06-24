@@ -1,12 +1,8 @@
 """
-Analyst agent — reads the gathered Evidence and produces a SYNTHESIS (themes,
-agreements, contradictions, and gaps) that the Writer uses as a scaffold.
+Analyst agent. Reads the gathered evidence and produces a synthesis (themes,
+agreements, contradictions, gaps) that the Writer uses as a scaffold and that
+feeds the Critic's call on whether more research is needed.
 
-Separating "understand the evidence" from "write it up" is a real multi-agent
-design win: the Writer produces a tighter brief, and the Analyst's gap-spotting
-feeds the Critic's decision about whether more research is needed.
-
-CONTRACT
   reads : state["goal"], state["evidence"]
   writes: state["analysis"], state["status"], state["log"]
 """
@@ -20,7 +16,7 @@ from utils import numbered_evidence, truncate
 ANALYST_PROMPT = """You are the Analyst in a research pipeline. Study the evidence
 and produce a SYNTHESIS for the Writer — do NOT write the final brief.
 
-Identify, as short bullet points (refer to facts by their [n] number):
+Identify, as short bullet points (cite sources by their [n] number):
 - the main points that answer the goal,
 - agreements and any CONTRADICTIONS between sources,
 - notable GAPS (what is missing to answer the goal well).
@@ -60,7 +56,6 @@ def analyst(state: AtlasState) -> dict:
 
 
 if __name__ == "__main__":
-    # Run the Analyst alone with hand-made evidence:  python analyst.py
     state = new_state("Compare LangGraph and CrewAI.")
     state["evidence"] = [
         {"claim": "LangGraph gives low-level graph control over agents.",

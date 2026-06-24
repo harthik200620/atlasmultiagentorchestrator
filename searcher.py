@@ -1,11 +1,7 @@
 """
-Searcher agent — turns the research goal (and the Planner's steps, when present)
-into web searches, and hands back the raw results for the Reader to digest.
+Searcher agent. Runs the plan's queries (or the goal) through the Tavily search
+tool and hands back de-duplicated raw results for the Reader.
 
-It's a 'tool-using' agent: no LLM reasoning here, just disciplined use of the
-Tavily search tool, de-duplicating by URL so we don't read the same page twice.
-
-CONTRACT
   reads : state["goal"], state["plan"] (optional)
   writes: state["search_results"], state["status"], state["log"]
 """
@@ -20,11 +16,9 @@ def searcher(state: AtlasState, max_sources: int = 8) -> dict:
     goal = (state.get("goal") or "").strip()
     plan = state.get("plan") or []
 
-    # Search each plan step if we have a plan; otherwise search the goal itself.
     queries = [q for q in (plan if plan else [goal]) if q and q.strip()]
 
-    # Cap the total sources so the Reader's per-source LLM calls stay bounded
-    # now that the Planner can hand us several queries.
+    # Cap total sources to keep the Reader's per-source LLM calls bounded.
     results = []
     seen_urls = set()
     for query in queries:
@@ -38,7 +32,7 @@ def searcher(state: AtlasState, max_sources: int = 8) -> dict:
                 if len(results) >= max_sources:
                     break
 
-    # If we found nothing at all, flag failure so the supervisor can react later.
+    # No results means failure, so the supervisor can react.
     status = "reading" if results else "failed"
     note = (
         f"Searcher: ran {len(queries)} query(ies), "
@@ -48,7 +42,6 @@ def searcher(state: AtlasState, max_sources: int = 8) -> dict:
 
 
 if __name__ == "__main__":
-    # Run the Searcher alone:  python searcher.py
     state = new_state("What is LangGraph and how does its supervisor pattern work?")
     out = searcher(state)
     print(out["log"][0])

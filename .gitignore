@@ -19,8 +19,5 @@ env/
 .DS_Store
 Thumbs.db
 
-# --- Streamlit secrets (Phase 6) ---
-.streamlit/secrets.toml
-
-# --- Local run outputs (eval dumps get large; put your headline number in README) ---
+# --- Local run outputs ---
 results/

@@ -4,8 +4,9 @@ import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-// Where the FastAPI backend lives. Local default; on Vercel set NEXT_PUBLIC_API_URL.
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+// Backend URL — set NEXT_PUBLIC_API_URL on Vercel. Trailing slashes are trimmed
+// so `${API}/research` can never become a double slash (which 404s).
+const API = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 
 const EXAMPLES = [
   "Compare LangGraph and CrewAI for building multi-agent systems",
@@ -45,8 +46,8 @@ export default function Home() {
       es.close();
     });
 
-    // Fires for our server-sent 'error' events (have .data) AND for connection
-    // problems (no .data). Ignore once we've already finished.
+    // Fires both for server-sent 'error' events (with .data) and for connection
+    // failures (no .data). Skip if we've already finished.
     es.addEventListener("error", (e) => {
       if (doneRef.current) return;
       if (e.data) {
@@ -119,7 +120,14 @@ export default function Home() {
             <span>{result.steps} steps</span>
           </div>
           <article className="md">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ node, ...props }) => (
+                  <a {...props} target="_blank" rel="noreferrer" />
+                ),
+              }}
+            >
               {result.draft || "_(no brief produced)_"}
             </ReactMarkdown>
           </article>

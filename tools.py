@@ -1,10 +1,8 @@
 """
-tools.py — Atlas's external tools (the capabilities its agents call).
+tools.py - Atlas's external tools: web search and page extraction via Tavily.
 
-Right now that's web search and page extraction via Tavily. Each tool has a
-STRICT contract (clear inputs and outputs) and is built so a network hiccup or a
-dead link can NEVER crash a run: it retries transient failures and then degrades
-gracefully (returns [] or "") instead of raising.
+Each tool retries transient failures and then degrades gracefully (returns [] or
+"") rather than raising, so a network hiccup or dead link can't crash a run.
 """
 
 from __future__ import annotations
@@ -16,8 +14,7 @@ from tavily import TavilyClient
 import config
 from state import SearchResult
 
-# One shared Tavily client, created on first use (so importing tools.py is cheap
-# and doesn't require a key to be present yet).
+# One shared Tavily client, created on first use so import doesn't require a key.
 _client: TavilyClient | None = None
 
 
@@ -25,7 +22,7 @@ def _tavily() -> TavilyClient:
     global _client
     if _client is None:
         if not config.TAVILY_API_KEY:
-            raise RuntimeError("TAVILY_API_KEY missing — add it to your .env file.")
+            raise RuntimeError("TAVILY_API_KEY missing - add it to your .env file.")
         _client = TavilyClient(api_key=config.TAVILY_API_KEY)
     return _client
 
@@ -70,7 +67,7 @@ def tavily_search(
             if attempt < retries:
                 print(
                     f"[tools] search failed (try {attempt + 1}/{retries + 1}): "
-                    f"{type(err).__name__} — retrying..."
+                    f"{type(err).__name__} - retrying..."
                 )
                 time.sleep(1.5 * (attempt + 1))
             else:
@@ -83,7 +80,7 @@ def tavily_search(
 
 def tavily_extract(url: str, retries: int = 1) -> str:
     """Fetch the full text of one page. Returns "" if the link is dead or
-    unfetchable — a dead link must never crash Atlas."""
+    unfetchable - a dead link must never crash Atlas."""
     url = (url or "").strip()
     if not url:
         return ""
@@ -102,7 +99,6 @@ def tavily_extract(url: str, retries: int = 1) -> str:
 
 
 if __name__ == "__main__":
-    # Quick standalone test:  python tools.py
     print("Testing tavily_search...")
     hits = tavily_search("LangGraph supervisor multi-agent pattern", max_results=3)
     print(f"  got {len(hits)} result(s)")

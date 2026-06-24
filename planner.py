@@ -1,9 +1,7 @@
 """
-Planner agent — the first worker. It turns the research goal into a short list of
-focused web-search queries (the 'plan'), so the Searcher fetches varied, relevant
-sources instead of just echoing the goal back.
+Planner agent. Turns the research goal into a short list of focused web-search
+queries so the Searcher fetches varied sources instead of echoing the goal.
 
-CONTRACT
   reads : state["goal"]
   writes: state["plan"], state["status"], state["log"]
 """
@@ -39,14 +37,13 @@ def planner(state: AtlasState) -> dict:
         print(f"[planner] LLM failed: {type(err).__name__}: {err}")
 
     if not plan:
-        plan = [goal]  # safe fallback: at least search the goal itself
+        plan = [goal]  # fallback: at least search the goal itself
 
     note = f"Planner: broke the goal into {len(plan)} search step(s)."
     return {"plan": plan, "status": "searching", "log": [note]}
 
 
 if __name__ == "__main__":
-    # Run the Planner alone:  python planner.py
     out = planner(new_state("How does LangGraph's supervisor pattern compare to CrewAI?"))
     print(out["log"][0])
     for i, q in enumerate(out["plan"], 1):

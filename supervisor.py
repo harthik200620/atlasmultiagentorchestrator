@@ -1,21 +1,11 @@
 """
-supervisor.py -the ROUTER at the center of Atlas.
+supervisor.py - the router at the center of Atlas.
 
-In the supervisor multi-agent pattern, workers don't call each other. Every
-worker reports back to the supervisor, which looks at the shared `status` and
-decides who runs next. That single decision point is what makes the system easy
-to reason about.
-
-Phase 3: the supervisor now also drives the Critic's REVISE-LOOP. When the Critic
-rejects a draft, the supervisor either:
-  - routes back to the Searcher with the Critic's new queries (gather more), or
-  - routes back to the Writer to rewrite addressing the critique,
-and it keeps looping until the Critic approves OR we hit MAX_ITERATIONS revisions.
-
-CONTRACT
-  reads : state["status"], state["iterations"], state["revisions"], state["revise_queries"]
-  writes: state["next_agent"], state["iterations"], state["revisions"],
-          state["plan"], state["revise_queries"], state["status"], state["log"]
+Workers don't call each other; each reports back to the supervisor, which reads
+the shared `status` and decides who runs next. The supervisor also drives the
+Critic's revise loop: on a rejected draft it routes back to the Searcher for more
+evidence or to the Writer for a rewrite, looping until the Critic approves or
+MAX_ITERATIONS revisions are used.
 """
 
 from __future__ import annotations
@@ -23,8 +13,8 @@ from __future__ import annotations
 import config
 from state import AtlasState
 
-# Which worker handles each forward status. The worker that just ran sets the
-# NEXT status; the supervisor turns that status into the next destination.
+# Maps each forward status to the worker that handles it. The worker that just
+# ran sets the next status; the supervisor turns that into the next destination.
 STATUS_TO_AGENT = {
     "planning": "planner",
     "searching": "searcher",
@@ -32,12 +22,12 @@ STATUS_TO_AGENT = {
     "analyzing": "analyst",
     "writing": "writer",
     "criticizing": "critic",
-    "failed": "writer",   # degrade gracefully -let the Writer say "insufficient"
+    "failed": "writer",   # degrade gracefully: let the Writer say "insufficient"
     "done": "end",
 }
 
-# Absolute backstop on supervisor visits (belt-and-suspenders against a runaway
-# loop). The MEANINGFUL cap is MAX_ITERATIONS revise-rounds, handled below.
+# Absolute backstop against a runaway loop. The meaningful cap is MAX_ITERATIONS
+# revise-rounds, handled below.
 MAX_SUPERVISOR_STEPS = 12 + 12 * max(1, config.MAX_ITERATIONS)
 
 
@@ -53,7 +43,7 @@ def supervisor(state: AtlasState) -> dict:
             "log": [f"Supervisor: absolute step backstop ({MAX_SUPERVISOR_STEPS}) reached -stopping."],
         }
 
-    # --- the Critic asked for a revision ---
+    # the Critic asked for a revision
     if status == "revise":
         if revisions >= config.MAX_ITERATIONS:
             return {
@@ -65,7 +55,7 @@ def supervisor(state: AtlasState) -> dict:
         revisions += 1
         extra = state.get("revise_queries") or []
         if extra:
-            # Evidence gap -> gather MORE using the Critic's new queries.
+            # Evidence gap: gather more using the Critic's new queries.
             return {
                 "next_agent": "searcher",
                 "iterations": iterations,
@@ -75,7 +65,7 @@ def supervisor(state: AtlasState) -> dict:
                 "status": "searching",
                 "log": [f"Supervisor: revision {revisions}/{config.MAX_ITERATIONS} -gathering more evidence ({len(extra)} new queries)."],
             }
-        # Evidence is fine -> just rewrite, addressing the critique.
+        # Evidence is fine: rewrite, addressing the critique.
         return {
             "next_agent": "writer",
             "iterations": iterations,
@@ -84,7 +74,7 @@ def supervisor(state: AtlasState) -> dict:
             "log": [f"Supervisor: revision {revisions}/{config.MAX_ITERATIONS} -rewriting to address the critique."],
         }
 
-    # --- normal forward routing ---
+    # normal forward routing
     nxt = STATUS_TO_AGENT.get(status, "end")
     return {
         "next_agent": nxt,
@@ -99,7 +89,7 @@ def route(state: AtlasState) -> str:
 
 
 if __name__ == "__main__":
-    # Test the routing logic alone (no graph, no API):  python supervisor.py
+    # Exercise the routing logic alone, without the graph or any API calls.
     print("Forward routing:")
     for st in ["planning", "searching", "reading", "analyzing", "writing", "criticizing", "done"]:
         print(f"  status={st:12s} -> {supervisor({'status': st, 'iterations': 0})['next_agent']}")

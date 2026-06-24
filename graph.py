@@ -1,22 +1,12 @@
 """
-graph.py — assembles the worker agents into a LangGraph SUPERVISOR graph and
-gives you a CLI to run a research goal end to end.
+graph.py - assembles the worker agents into a LangGraph supervisor graph and
+exposes a CLI to run a research goal end to end.
 
-Topology (hub-and-spoke — the supervisor pattern):
-
-    START -> supervisor -> (planner | searcher | reader | analyst | writer | critic | END)
-                 ^                                  |
-                 |__________________________________|     every worker reports back
-
-The Critic can send work back: the supervisor loops (more searching, or a
-rewrite) until the Critic approves or MAX_ITERATIONS revisions are used.
-
-Phase 4: if Langfuse keys are set, the whole run is recorded as one trace tree
-you can open in the Langfuse dashboard.
-
-Run it:
-    python graph.py "your research goal here"
-    python graph.py --mermaid          # print the graph diagram (paste into mermaid.live)
+Topology is hub-and-spoke: START -> supervisor -> one of the workers (planner,
+searcher, reader, analyst, writer, critic) -> back to the supervisor, repeating
+until END. The Critic can send work back, so the supervisor loops on more
+searching or a rewrite until the Critic approves or MAX_ITERATIONS revisions are
+used. If Langfuse keys are set, the whole run is recorded as one trace tree.
 """
 
 from __future__ import annotations
@@ -35,7 +25,6 @@ from state import AtlasState, new_state
 from supervisor import MAX_SUPERVISOR_STEPS, route, supervisor
 from writer import writer
 
-# name -> node function, for the worker agents
 WORKERS = {
     "planner": planner,
     "searcher": searcher,
@@ -50,24 +39,19 @@ RECURSION_LIMIT = 2 * MAX_SUPERVISOR_STEPS + 20
 
 
 def build_graph():
-    """Wire the supervisor + workers into a compiled LangGraph."""
+    """Wire the supervisor and workers into a compiled LangGraph."""
     builder = StateGraph(AtlasState)
 
     builder.add_node("supervisor", supervisor)
     for name, fn in WORKERS.items():
         builder.add_node(name, fn)
 
-    # Enter at the supervisor; it decides the first move.
     builder.add_edge(START, "supervisor")
-
-    # The supervisor routes to the chosen worker (or to END).
     builder.add_conditional_edges(
         "supervisor",
         route,
         {**{name: name for name in WORKERS}, "end": END},
     )
-
-    # Every worker reports straight back to the supervisor.
     for name in WORKERS:
         builder.add_edge(name, "supervisor")
 
@@ -75,7 +59,7 @@ def build_graph():
 
 
 def _stream(graph, init_state: AtlasState, cfg: dict, verbose: bool) -> AtlasState:
-    """Run the graph, printing each new log line as it appears. Returns the
+    """Run the graph, printing each new log line as it appears, and return the
     final accumulated state (stream_mode='values' yields full snapshots)."""
     final_state: AtlasState = init_state
     printed = 0
@@ -90,9 +74,10 @@ def _stream(graph, init_state: AtlasState, cfg: dict, verbose: bool) -> AtlasSta
 
 
 def run(goal: str, verbose: bool = True, trace: bool = True) -> AtlasState:
-    """Run Atlas on a goal. If Langfuse is configured AND trace=True, the whole
+    """Run Atlas on a goal. If Langfuse is configured and trace=True, the whole
     run is captured as one named trace and the trace URL is printed. The eval
-    passes trace=False (it doesn't need traces and they add export overhead)."""
+    passes trace=False, since it doesn't need traces and they add export
+    overhead."""
     graph = build_graph()
     init_state = new_state(goal)
     cfg: dict = {"recursion_limit": RECURSION_LIMIT}
@@ -103,16 +88,15 @@ def run(goal: str, verbose: bool = True, trace: bool = True) -> AtlasState:
 
     client = tracing.langfuse_client() if trace else None
     if client is None:
-        # Tracing off — just run.
         return _stream(graph, init_state, cfg, verbose)
 
-    # Tracing on — wrap the whole run in ONE named trace so every agent and LLM
-    # call nests underneath it.
+    # Wrap the whole run in one named trace so every agent and LLM call nests
+    # underneath it.
     with client.start_as_current_observation(
         name="atlas-research", as_type="chain", input=goal
     ) as span:
         final_state = _stream(graph, init_state, cfg, verbose)
-        try:  # best-effort: label the trace with the result + some stats
+        try:  # best-effort: label the trace with the result and some stats
             span.update_trace(
                 input=goal,
                 output=final_state.get("draft", ""),
@@ -122,7 +106,7 @@ def run(goal: str, verbose: bool = True, trace: bool = True) -> AtlasState:
                     "final_status": final_state.get("status"),
                 },
             )
-        except Exception:  # noqa: BLE001 — never let tracing break a run
+        except Exception:  # noqa: BLE001 - never let tracing break a run
             pass
         trace_id = client.get_current_trace_id()
 

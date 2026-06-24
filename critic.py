@@ -1,10 +1,8 @@
 """
-Critic agent -the quality GATE. It reads the draft against the goal and the
-evidence and either APPROVES it or sends it back with specific, actionable
-feedback (and, when evidence is genuinely insufficient, new search queries to
-fill the gaps). The supervisor turns a rejection into another revise-loop.
+Critic agent, the quality gate. Judges the draft against the goal and evidence
+and either approves it or returns actionable feedback, plus new search queries
+when evidence is insufficient. The supervisor turns a rejection into a revise loop.
 
-CONTRACT
   reads : state["goal"], state["draft"], state["evidence"]
   writes: state["status"] ("done" or "revise"), state["critique"],
           state["revise_queries"], state["log"]
@@ -45,7 +43,7 @@ def critic(state: AtlasState) -> dict:
     draft = (state.get("draft") or "").strip()
     evidence = state.get("evidence") or []
 
-    # Nothing to judge, or nothing more we could do -> accept gracefully.
+    # Nothing to judge: accept gracefully.
     if not draft or not evidence:
         return {
             "status": "done",
@@ -64,7 +62,7 @@ def critic(state: AtlasState) -> dict:
 
     if not isinstance(verdict, dict):
         verdict = {}
-    # Default to APPROVE on uncertainty -better than looping on a parse error.
+    # Default to approve on uncertainty rather than loop on a parse error.
     approved = bool(verdict.get("approved", True))
 
     if approved:
@@ -87,13 +85,13 @@ def critic(state: AtlasState) -> dict:
 
 
 if __name__ == "__main__":
-    # Standalone: a clearly weak (vague, uncited) draft should be rejected.
+    # A weak, uncited draft should be rejected.
     st = new_state("What is the LangGraph supervisor pattern?")
     st["evidence"] = [
         {"claim": "LangGraph has a supervisor pattern that routes to workers.",
          "source_url": "https://example.com/x", "snippet": "a supervisor routes to workers"},
     ]
-    st["draft"] = "LangGraph is a tool. It is good for agents."  # vague, no citations
+    st["draft"] = "LangGraph is a tool. It is good for agents."
     out = critic(st)
     print("weak draft ->", out["status"], "|", out["log"][0])
     if out.get("status") == "revise":

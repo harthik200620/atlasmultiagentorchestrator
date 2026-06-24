@@ -1,25 +1,13 @@
 """
-evaluate.py — measure how well Atlas does, with an LLM-as-judge.
+evaluate.py - score Atlas with an LLM-as-judge.
 
-For each goal in eval_goals.GOALS it:
-  1. runs Atlas end to end,
-  2. asks a judge LLM whether the brief CORRECTLY answers the goal AND is sourced,
-  3. records the verdict.
-Then it saves everything to results/ and prints the task-success rate — the
-headline number for your resume.
+For each goal in eval_goals.GOALS, runs Atlas end to end, asks a judge LLM
+whether the brief answers the goal and is sourced, then saves the verdicts to
+results/ and prints the task-success rate.
 
-Usage:
-  python evaluate.py                 # ALL 40 goals (slow; hundreds of LLM calls)
-  python evaluate.py --limit 5       # just the first 5 (use this to validate first)
-  python evaluate.py --start 10 --limit 5
-  python evaluate.py --verbose       # also show each agent's log lines
-
-Tip: lower the revise cap for a faster/cheaper eval, e.g. (PowerShell)
-  $env:ATLAS_MAX_ITERATIONS=1 ; python evaluate.py
-
-NOTE: the judge uses the same model family as Atlas (Gemini), so there is some
-self-evaluation bias. For a more independent score, set LLM_PROVIDER to a
-different provider for the judge, or spot-check the saved reasoning by hand.
+The judge uses the same model family as Atlas (Gemini), so there is some
+self-evaluation bias. For a more independent score, point the judge at a
+different provider, or spot-check the saved reasoning by hand.
 """
 
 from __future__ import annotations
@@ -61,7 +49,7 @@ def judge(goal: str, brief: str) -> dict:
     if not brief.strip():
         return {"score": 1, "success": False, "sourced": False, "reasoning": "Empty brief."}
 
-    llm = config.get_llm(temperature=0.0)  # low temp -> consistent judging
+    llm = config.get_llm(temperature=0.0)  # low temp for consistent judging
     for attempt in range(2):
         try:
             resp = llm.invoke(JUDGE_PROMPT.format(goal=goal, brief=truncate(brief, 6000)))
@@ -98,7 +86,7 @@ def evaluate(goals, verbose_runs=False):
                 "status": state.get("status"),
                 "trace_url": state.get("_trace_url"),
             }
-        except Exception as err:  # noqa: BLE001 — one bad goal must not abort the eval
+        except Exception as err:  # noqa: BLE001 - one bad goal must not abort the eval
             print(f"  RUN FAILED: {type(err).__name__}: {err}")
             brief, meta = "", {"error": f"{type(err).__name__}: {err}"}
 

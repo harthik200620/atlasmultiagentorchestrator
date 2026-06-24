@@ -1,9 +1,6 @@
 """
-utils.py — small shared helpers used across Atlas's agents.
-
-Kept separate from tools.py (which talks to external services) because these are
-pure, local helpers: clipping text, rescuing JSON out of an LLM reply, and
-rendering evidence as a numbered list the LLM can cite by [n].
+utils.py - small, pure helpers shared across Atlas's agents: clipping text,
+parsing JSON out of an LLM reply, and rendering evidence as a citable list.
 """
 
 from __future__ import annotations
@@ -48,10 +45,32 @@ def extract_json(text: str):
     return None
 
 
+def source_order(evidence) -> list:
+    """Unique source URLs in first-seen order; their positions are the [n] citation numbers."""
+    order, seen = [], set()
+    for e in evidence or []:
+        url = (e.get("source_url") or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            order.append(url)
+    return order
+
+
 def numbered_evidence(evidence) -> str:
-    """Render evidence as a numbered list the LLM can cite by [n]."""
-    lines = [
-        f"[{i}] {e['claim']} (source: {e['source_url']})"
-        for i, e in enumerate(evidence, 1)
-    ]
-    return "\n".join(lines) if lines else "(no evidence gathered)"
+    """Group claims under their source's citation number, so the LLM cites by [n] = source."""
+    order = source_order(evidence)
+    num = {url: i for i, url in enumerate(order, 1)}
+    grouped = {}
+    for e in evidence or []:
+        n = num.get((e.get("source_url") or "").strip())
+        if n:
+            grouped.setdefault(n, []).append(str(e.get("claim", "")).strip())
+    if not grouped:
+        return "(no evidence gathered)"
+    lines = []
+    for n in range(1, len(order) + 1):
+        if n not in grouped:
+            continue
+        lines.append(f"[{n}] {order[n - 1]}")
+        lines.extend(f"    - {claim}" for claim in grouped[n])
+    return "\n".join(lines)

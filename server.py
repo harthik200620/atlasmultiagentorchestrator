@@ -1,20 +1,4 @@
-"""
-server.py — FastAPI backend that exposes Atlas over HTTP for the web UI.
-
-It reuses the EXACT same graph as the CLI (graph.build_graph()); this is just a
-thin HTTP + streaming layer on top of the validated agent pipeline.
-
-Endpoints:
-  GET /            -> basic info
-  GET /health      -> liveness check (Render pings this)
-  GET /research?goal=...  -> Server-Sent Events (SSE): one 'step' event per agent
-                            log line as it happens, then a 'done' event with the
-                            final cited brief + stats (or an 'error' event).
-
-Run locally:
-  uvicorn server:app --reload --port 8000
-Deploy (Render): start command  uvicorn server:app --host 0.0.0.0 --port $PORT
-"""
+"""FastAPI backend that exposes the Atlas agent graph over HTTP for the web UI."""
 
 from __future__ import annotations
 
@@ -35,8 +19,7 @@ from state import new_state
 
 app = FastAPI(title="Atlas API")
 
-# Let the Vercel frontend (and local dev) call us. In production, set
-# ALLOWED_ORIGINS to your Vercel URL instead of "*".
+# Lock this down to your frontend's origin in production via ALLOWED_ORIGINS.
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +28,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Build the graph once at startup (cheap; no network).
 _graph = build_graph()
 
 
@@ -65,19 +47,14 @@ def health():
 
 
 def _sse(event: str, data: dict) -> str:
-    """Format one Server-Sent Event."""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _run_stream(goal: str):
-    """SSE generator.
-
-    The agent graph runs in a dedicated WORKER THREAD so Langfuse's
-    OpenTelemetry span context lives entirely on one thread. (Starlette would
-    otherwise drive this generator across different threadpool threads, which
-    breaks the span's thread-local enter/exit.) The worker pushes log lines onto
-    a queue; we read them off and yield them as Server-Sent Events.
-    """
+    # The graph runs in a dedicated worker thread so Langfuse's OpenTelemetry span
+    # context stays on a single thread -- Starlette would otherwise drive this
+    # generator across threadpool threads and break the span's enter/exit. The
+    # worker pushes log lines onto a queue that we drain out as SSE events.
     events: queue.Queue = queue.Queue()
     DONE = object()
     result: dict = {}
@@ -119,7 +96,6 @@ def _run_stream(goal: str):
 
     threading.Thread(target=work, daemon=True).start()
 
-    # Stream log lines as the worker produces them.
     while True:
         item = events.get()
         if item is DONE:
@@ -127,7 +103,6 @@ def _run_stream(goal: str):
         name, data = item
         yield _sse(name, data)
 
-    # Worker finished — emit the final result (or the error).
     if "error" in result:
         yield _sse("error", {"message": result["error"]})
         return
@@ -165,6 +140,6 @@ def research(goal: str = ""):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # don't let proxies buffer the stream
+            "X-Accel-Buffering": "no",
         },
     )

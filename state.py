@@ -1,17 +1,10 @@
 """
-state.py — the shared "blackboard" that every Atlas agent reads and writes.
+state.py - the shared state that every Atlas agent reads and writes.
 
-THE KEY MULTI-AGENT IDEA: there is exactly ONE state object for a run. Each agent
-(a "node" in the graph) receives the whole state, does its one job, and returns
-ONLY the keys it changed. LangGraph merges those changes back in.
-
-How a key merges is decided by its *reducer*:
-  - No reducer   -> the new value REPLACES the old one        (e.g. `draft`)
-  - `add` reducer-> the new value is APPENDED to the old list (e.g. `evidence`)
-
-(Phase 1 note: we use a simple `log` list of strings for the activity feed.)
-(Phase 3 note: added `analysis`, plus `revisions`/`revise_queries` to drive the
-Critic's revise-loop.)
+There is one state object per run. Each agent (a node in the graph) receives the
+whole state and returns only the keys it changed; LangGraph merges them back in.
+A key's reducer decides how it merges: no reducer replaces the old value, while
+the `add` reducer appends to the existing list.
 """
 
 from __future__ import annotations
@@ -27,7 +20,7 @@ Status = Literal[
     "analyzing",    # Analyst is synthesizing/comparing
     "writing",      # Writer is drafting the report
     "criticizing",  # Critic is quality-gating the draft
-    "revise",       # Critic rejected — loop back and improve
+    "revise",       # Critic rejected, loop back and improve
     "done",         # finished
     "failed",       # unrecoverable (e.g. no sources found at all)
 ]
@@ -43,10 +36,9 @@ class SearchResult(TypedDict):
 
 
 class Evidence(TypedDict):
-    """A single fact the Reader extracted, tied to where it came from.
+    """A single fact the Reader extracted, tied to its source.
 
-    Every claim in Atlas's final report must trace back to one of these — that's
-    how we guarantee the brief is *sourced*, not hallucinated.
+    Every claim in the final report must trace back to one of these.
     """
 
     claim: str         # the fact, in our own words
@@ -57,8 +49,8 @@ class Evidence(TypedDict):
 class AtlasState(TypedDict, total=False):
     """The whole shared state.
 
-    `total=False` means an agent may return just the keys it touched instead of
-    the entire object — which is exactly how LangGraph nodes are meant to work.
+    `total=False` lets an agent return just the keys it touched rather than the
+    entire object.
     """
 
     # --- the task ---
@@ -107,7 +99,6 @@ def new_state(goal: str) -> AtlasState:
 
 
 if __name__ == "__main__":
-    # Tiny smoke test:  python state.py
     s = new_state("Compare LangGraph and CrewAI for building multi-agent apps.")
     print("Created AtlasState with keys:")
     print("  " + ", ".join(s.keys()))

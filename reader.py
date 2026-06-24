@@ -1,13 +1,10 @@
 """
-Reader agent — reads the Searcher's raw results and extracts the key FACTS that
-are relevant to the goal, each tied to its source URL. That (fact + URL) pair is
-our Evidence, and it's what lets the final report cite where every claim came from.
+Reader agent. Extracts goal-relevant facts from the Searcher's raw results, each
+tied to its source URL, so the final report can cite every claim.
 
-On a revise-loop it only reads sources it HASN'T read before (so re-searching for
-more evidence doesn't re-process old pages). If a result has no usable text, the
-Reader tries to fetch the page directly (dead-link fallback) before giving up.
+On a revise loop it skips sources already read. If a result has no usable text it
+fetches the page directly before giving up.
 
-CONTRACT
   reads : state["goal"], state["search_results"], state["evidence"]
   writes: state["evidence"] (appended), state["status"], state["log"]
 """
@@ -47,15 +44,15 @@ def reader(state: AtlasState, max_facts_per_source: int = 3) -> dict:
     for r in results:
         url = r.get("url", "")
         if url and url in already_read:
-            continue  # read on a previous pass — skip to avoid duplicate facts
+            continue
         new_sources += 1
 
         body = r.get("raw_content") or r.get("content") or ""
         if len(body) < 200:
-            # Thin or empty — try fetching the page directly (dead-link fallback).
+            # Thin or empty, so fetch the page directly.
             body = tavily_extract(url) or body
         if len(body.strip()) < 80:
-            continue  # nothing worth reading here
+            continue
 
         prompt = READER_PROMPT.format(
             goal=goal,
@@ -82,7 +79,7 @@ def reader(state: AtlasState, max_facts_per_source: int = 3) -> dict:
                     }
                 )
 
-    # We can move on to analysis if we have ANY evidence (new or from before).
+    # Proceed to analysis if we have any evidence, new or carried over.
     has_any = bool(evidence) or bool(state.get("evidence"))
     status = "analyzing" if has_any else "failed"
     note = (
@@ -93,7 +90,6 @@ def reader(state: AtlasState, max_facts_per_source: int = 3) -> dict:
 
 
 if __name__ == "__main__":
-    # Run the Reader alone:  python reader.py
     from tools import tavily_search
 
     goal = "What is LangGraph's supervisor multi-agent pattern?"

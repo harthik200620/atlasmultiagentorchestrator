@@ -8,7 +8,9 @@ meets a quality bar.
 Built with **LangGraph** (custom **supervisor** multi-agent pattern), a **FastAPI**
 streaming backend, and a **Next.js** frontend.
 
-> **Live demo:** frontend on Vercel · API on Render — _add your URLs here once deployed._
+> **Live API:** **https://atlasmultiagentorchestrator.onrender.com** — try
+> [`/health`](https://atlasmultiagentorchestrator.onrender.com/health). The `web/`
+> frontend deploys to Vercel with `NEXT_PUBLIC_API_URL` pointed at this API.
 
 ---
 
@@ -184,4 +186,4 @@ For tighter CORS, set `ALLOWED_ORIGINS` on Render to your Vercel URL.)_
 
 ---
 
-_Built phase by phase as a learning project — LangGraph supervisor pattern, end to end._
+_LangGraph supervisor pattern — six specialized agents, one cited brief._

@@ -1,16 +1,12 @@
-# Render deployment for the Atlas FastAPI backend.
+# Render blueprint for the Atlas FastAPI backend.
 #
-# Steps:
-#   1. Push this repo to GitHub.
-#   2. On render.com:  New +  ->  Blueprint  ->  point at your repo.
-#   3. In the service's "Environment" tab, add your SECRETS (do NOT put them here):
-#        GEMINI_API_KEY_4 ... GEMINI_API_KEY_12, TAVILY_API_KEY,
-#        LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
-#   4. After it deploys, copy the service URL (e.g. https://atlas-api.onrender.com)
-#      into the frontend's NEXT_PUBLIC_API_URL.
+# Secrets are set in the service's Environment tab, not here: GEMINI_API_KEY_4
+# through GEMINI_API_KEY_12, TAVILY_API_KEY, LANGFUSE_PUBLIC_KEY,
+# LANGFUSE_SECRET_KEY, LANGFUSE_HOST. After deploy, point the frontend's
+# NEXT_PUBLIC_API_URL at the service URL.
 #
-# Note: the free plan sleeps after ~15 min idle, so the first request after a
-# nap takes ~30-60s to wake up. Fine for a demo.
+# The free plan sleeps after ~15 min idle, so the first request after a nap
+# takes ~30-60s to wake up.
 
 services:
   - type: web

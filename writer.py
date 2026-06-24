@@ -1,31 +1,35 @@
 """
-Writer agent — turns the gathered Evidence (and the Analyst's synthesis) into a
-short, well-structured research brief in Markdown, where every claim cites its
-source URL. On a revision pass it also addresses the Critic's feedback. If the
-evidence is thin, it says so HONESTLY instead of padding with unsourced filler.
+Writer agent. Turns the evidence and the Analyst's synthesis into a short
+Markdown research brief that cites its sources by number, addressing the Critic's
+feedback on a revision pass. If evidence is thin it says so rather than padding
+with unsourced filler.
 
-CONTRACT
   reads : state["goal"], state["evidence"], state["analysis"], state["critique"]
   writes: state["draft"], state["status"], state["log"]
 """
 
 from __future__ import annotations
 
+import re
+from urllib.parse import urlparse
+
 import config
 from state import AtlasState, new_state
-from utils import numbered_evidence, truncate
+from utils import numbered_evidence, source_order, truncate
 
 BASE_RULES = """You are the Writer in a research pipeline. Write a concise,
 well-organized research brief in Markdown that answers the goal USING ONLY the
 evidence provided.
 
 Rules:
-- Every factual claim cites its source as [n](url) using the numbered sources.
-- Do NOT invent facts or URLs. If evidence is thin or one-sided, say so in a
-  short "Caveats" line.
-- Structure: a one-line summary, then 2-5 short sections, then a "Sources" list."""
+- Support every factual claim with a citation: the bracketed source number from
+  the EVIDENCE list, e.g. [1] or [2]. Combine related ones as [1, 3].
+- Do NOT invent facts or sources. If evidence is thin or one-sided, add a short
+  "Caveats" line saying so.
+- Structure: a one-line summary, then 2-5 short sections. Do NOT add your own
+  Sources/References list - it is generated automatically from the citations."""
 
-# Critique placeholders that mean "approved", so we don't feed them back as feedback.
+# Critique placeholders that mean "approved"; not fed back as feedback.
 _APPROVED_MARKERS = {"(approved)", "(auto-approved: nothing to revise)"}
 
 
@@ -40,10 +44,59 @@ def _build_prompt(goal: str, evidence: list, analysis: str, critique: str) -> st
         )
     parts.append(f"GOAL: {goal}")
     parts.append(
-        "EVIDENCE (numbered; cite by number):\n"
+        "EVIDENCE (cite claims by the bracketed source number):\n"
         + truncate(numbered_evidence(evidence), 8000)
     )
     return "\n\n".join(parts)
+
+
+def _site(url: str) -> str:
+    """Short, human-readable label for a source URL (its domain)."""
+    try:
+        host = urlparse(url).netloc.lower()
+        return host[4:] if host.startswith("www.") else host
+    except Exception:
+        return url
+
+
+def _strip_sources_section(md: str) -> str:
+    """Drop any Sources/References list the model wrote; we generate our own."""
+    m = re.search(
+        r"(?im)^\s*(?:#{1,6}\s*|\*\*)?(sources?|references?|citations?|bibliography)\b\s*:?\**\s*$",
+        md,
+    )
+    return md[: m.start()].rstrip() if m else md.rstrip()
+
+
+def _linkify_citations(md: str, order: list) -> str:
+    """Turn bare [n] / [n, m] markers into clickable links to their source URL."""
+    def repl(match: re.Match) -> str:
+        nums = [int(x) for x in re.findall(r"\d+", match.group(1))]
+        if not any(1 <= n <= len(order) for n in nums):
+            return match.group(0)  # not a citation we recognize - leave as-is
+        parts = [
+            f"[{n}]({order[n - 1]})" if 1 <= n <= len(order) else str(n)
+            for n in nums
+        ]
+        return "\\[" + ", ".join(parts) + "\\]"
+
+    # [n], [n, m], [n,m] -- but skip an existing [text](link).
+    return re.sub(r"\[(\d+(?:\s*,\s*\d+)*)\](?!\()", repl, md)
+
+
+def _sources_section(order: list) -> str:
+    if not order:
+        return ""
+    lines = ["## Sources", ""]
+    lines += [f"{i}. [{_site(url)}]({url})" for i, url in enumerate(order, 1)]
+    return "\n".join(lines)
+
+
+def _finalize(draft: str, order: list) -> str:
+    """Make citations clickable and append a numbered Sources list."""
+    draft = _linkify_citations(_strip_sources_section(draft), order)
+    sources = _sources_section(order)
+    return f"{draft.rstrip()}\n\n{sources}" if sources else draft.rstrip()
 
 
 def writer(state: AtlasState) -> dict:
@@ -52,7 +105,7 @@ def writer(state: AtlasState) -> dict:
     analysis = state.get("analysis") or ""
     critique = state.get("critique") or ""
 
-    # Honest fallback: no evidence -> say so, never fabricate. (Done, no Critic.)
+    # No evidence: say so rather than fabricate, and skip the Critic.
     if not evidence:
         draft = (
             f"# {goal}\n\n"
@@ -63,21 +116,25 @@ def writer(state: AtlasState) -> dict:
         return {
             "draft": draft,
             "status": "done",
-            "log": ["Writer: no evidence — wrote an honest 'insufficient' note."],
+            "log": ["Writer: no evidence - wrote an honest 'insufficient' note."],
         }
 
+    order = source_order(evidence)
     prompt = _build_prompt(goal, evidence, analysis, critique)
     try:
         resp = config.get_llm().invoke(prompt)
         draft = getattr(resp, "content", "") or ""
-    except Exception as err:  # noqa: BLE001  — never crash the pipeline
+    except Exception as err:  # noqa: BLE001
         print(f"[writer] LLM failed: {type(err).__name__}: {err}")
         draft = ""
 
     if not draft.strip():
-        # Fallback: still hand back the sourced facts we gathered.
+        # Fallback: hand back the gathered facts, already cited by source number.
+        num = {url: i for i, url in enumerate(order, 1)}
         bullets = "\n".join(
-            f"- {e['claim']} ([source]({e['source_url']}))" for e in evidence
+            f"- {e['claim']} \\[[{num[e['source_url']]}]({e['source_url']})\\]"
+            for e in evidence
+            if e.get("source_url") in num
         )
         draft = (
             f"# {goal}\n\n"
@@ -85,13 +142,12 @@ def writer(state: AtlasState) -> dict:
             f"{bullets}"
         )
 
+    draft = _finalize(draft, order)
     note = f"Writer: drafted a brief from {len(evidence)} evidence item(s)."
-    # Hand off to the Critic for quality-gating.
     return {"draft": draft, "status": "criticizing", "log": [note]}
 
 
 if __name__ == "__main__":
-    # Run the Writer alone with hand-made evidence:  python writer.py
     state = new_state("Is LangGraph a good fit for multi-agent systems?")
     state["evidence"] = [
         {"claim": "LangGraph models agent workflows as a graph of nodes sharing one state.",

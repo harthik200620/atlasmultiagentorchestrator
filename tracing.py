@@ -1,15 +1,8 @@
 """
-tracing.py — optional Langfuse tracing for Atlas.
+tracing.py - optional Langfuse tracing for Atlas (targets langfuse 4.x).
 
-When the LANGFUSE_* keys are set in .env, every Atlas run is recorded as ONE
-trace tree in Langfuse: the supervisor, each worker agent, every LLM call (with
-tokens + latency), and the revise-loop — all nested and clickable. If the keys
-are absent, tracing silently no-ops so the app still runs fine without Langfuse.
-
-This targets langfuse 4.x (OpenTelemetry-based):
-  - Langfuse(...)                       -> the client (also becomes the default)
-  - langfuse.langchain.CallbackHandler  -> bridges LangChain/LangGraph events
-  - start_as_current_observation(...)   -> wraps a run so it's ONE named trace
+When the LANGFUSE_* keys are set in .env, each run is recorded as one nested
+trace tree. If the keys are absent, tracing silently no-ops.
 """
 
 from __future__ import annotations
@@ -57,7 +50,6 @@ def enabled() -> bool:
 
 
 if __name__ == "__main__":
-    # Verify the keys actually work:  python tracing.py
     client = langfuse_client()
     if client is None:
         print("Langfuse tracing OFF (no LANGFUSE_PUBLIC_KEY/SECRET_KEY in .env).")
