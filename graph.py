@@ -11,6 +11,9 @@ Topology (hub-and-spoke — the supervisor pattern):
 The Critic can send work back: the supervisor loops (more searching, or a
 rewrite) until the Critic approves or MAX_ITERATIONS revisions are used.
 
+Phase 4: if Langfuse keys are set, the whole run is recorded as one trace tree
+you can open in the Langfuse dashboard.
+
 Run it:
     python graph.py "your research goal here"
     python graph.py --mermaid          # print the graph diagram (paste into mermaid.live)
@@ -22,6 +25,7 @@ import sys
 
 from langgraph.graph import END, START, StateGraph
 
+import tracing
 from analyst import analyst
 from critic import critic
 from planner import planner
@@ -70,24 +74,63 @@ def build_graph():
     return builder.compile()
 
 
-def run(goal: str, verbose: bool = True) -> AtlasState:
-    """Run Atlas on a goal, printing each agent's log line as it happens."""
-    graph = build_graph()
-    final_state: AtlasState = new_state(goal)
+def _stream(graph, init_state: AtlasState, cfg: dict, verbose: bool) -> AtlasState:
+    """Run the graph, printing each new log line as it appears. Returns the
+    final accumulated state (stream_mode='values' yields full snapshots)."""
+    final_state: AtlasState = init_state
     printed = 0
-
-    # stream_mode="values" yields the FULL accumulated state after each step,
-    # so we can show progress live and keep the last snapshot as the result.
-    for snapshot in graph.stream(
-        final_state, {"recursion_limit": RECURSION_LIMIT}, stream_mode="values"
-    ):
+    for snapshot in graph.stream(init_state, cfg, stream_mode="values"):
         final_state = snapshot
         log = snapshot.get("log") or []
         for line in log[printed:]:
             if verbose:
                 print(f"  - {line}")
         printed = len(log)
+    return final_state
 
+
+def run(goal: str, verbose: bool = True) -> AtlasState:
+    """Run Atlas on a goal. If Langfuse is configured, the whole run is captured
+    as one named trace and the trace URL is printed."""
+    graph = build_graph()
+    init_state = new_state(goal)
+    cfg: dict = {"recursion_limit": RECURSION_LIMIT}
+
+    handler = tracing.callback_handler()
+    if handler is not None:
+        cfg["callbacks"] = [handler]
+
+    client = tracing.langfuse_client()
+    if client is None:
+        # Tracing off — just run.
+        return _stream(graph, init_state, cfg, verbose)
+
+    # Tracing on — wrap the whole run in ONE named trace so every agent and LLM
+    # call nests underneath it.
+    with client.start_as_current_observation(
+        name="atlas-research", as_type="chain", input=goal
+    ) as span:
+        final_state = _stream(graph, init_state, cfg, verbose)
+        try:  # best-effort: label the trace with the result + some stats
+            span.update_trace(
+                input=goal,
+                output=final_state.get("draft", ""),
+                metadata={
+                    "revisions": final_state.get("revisions", 0),
+                    "evidence_items": len(final_state.get("evidence") or []),
+                    "final_status": final_state.get("status"),
+                },
+            )
+        except Exception:  # noqa: BLE001 — never let tracing break a run
+            pass
+        trace_id = client.get_current_trace_id()
+
+    client.flush()
+    url = client.get_trace_url(trace_id=trace_id) if trace_id else None
+    if url:
+        final_state["_trace_url"] = url
+        if verbose:
+            print(f"\n[langfuse] trace -> {url}")
     return final_state
 
 
