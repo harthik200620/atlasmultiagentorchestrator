@@ -1,10 +1,11 @@
 """
-Writer agent — turns the gathered Evidence into a short, well-structured research
-brief in Markdown, where every claim cites its source URL. If the evidence is
-thin, it says so HONESTLY instead of padding the brief with unsourced filler.
+Writer agent — turns the gathered Evidence (and the Analyst's synthesis) into a
+short, well-structured research brief in Markdown, where every claim cites its
+source URL. On a revision pass it also addresses the Critic's feedback. If the
+evidence is thin, it says so HONESTLY instead of padding with unsourced filler.
 
 CONTRACT
-  reads : state["goal"], state["evidence"]
+  reads : state["goal"], state["evidence"], state["analysis"], state["critique"]
   writes: state["draft"], state["status"], state["log"]
 """
 
@@ -12,39 +13,46 @@ from __future__ import annotations
 
 import config
 from state import AtlasState, new_state
-from utils import truncate
+from utils import numbered_evidence, truncate
 
-WRITER_PROMPT = """You are the Writer in a research pipeline. Write a concise,
+BASE_RULES = """You are the Writer in a research pipeline. Write a concise,
 well-organized research brief in Markdown that answers the goal USING ONLY the
-evidence provided below.
+evidence provided.
 
 Rules:
-- Every factual claim must cite its source with a Markdown link like [1](url),
-  using the numbered sources below.
-- Do NOT invent facts or URLs. If the evidence is thin or one-sided, say so
-  honestly in a short "Caveats" line.
-- Structure: a one-line summary, then 2-5 short sections, then a "Sources" list.
+- Every factual claim cites its source as [n](url) using the numbered sources.
+- Do NOT invent facts or URLs. If evidence is thin or one-sided, say so in a
+  short "Caveats" line.
+- Structure: a one-line summary, then 2-5 short sections, then a "Sources" list."""
 
-GOAL: {goal}
-
-EVIDENCE (numbered; cite by number):
-{evidence_block}
-"""
+# Critique placeholders that mean "approved", so we don't feed them back as feedback.
+_APPROVED_MARKERS = {"(approved)", "(auto-approved: nothing to revise)"}
 
 
-def _evidence_block(evidence) -> str:
-    lines = [
-        f"[{i}] {e['claim']} (source: {e['source_url']})"
-        for i, e in enumerate(evidence, 1)
-    ]
-    return "\n".join(lines) if lines else "(no evidence gathered)"
+def _build_prompt(goal: str, evidence: list, analysis: str, critique: str) -> str:
+    parts = [BASE_RULES]
+    if analysis and analysis.strip():
+        parts.append("Use this analysis from the Analyst as your scaffold:\n" + analysis.strip())
+    if critique and critique.strip() and critique.strip() not in _APPROVED_MARKERS:
+        parts.append(
+            "A reviewer asked you to REVISE the previous draft. Address this "
+            "feedback specifically:\n" + critique.strip()
+        )
+    parts.append(f"GOAL: {goal}")
+    parts.append(
+        "EVIDENCE (numbered; cite by number):\n"
+        + truncate(numbered_evidence(evidence), 8000)
+    )
+    return "\n\n".join(parts)
 
 
 def writer(state: AtlasState) -> dict:
     goal = state.get("goal") or ""
     evidence = state.get("evidence") or []
+    analysis = state.get("analysis") or ""
+    critique = state.get("critique") or ""
 
-    # Honest fallback: no evidence -> say so, never fabricate.
+    # Honest fallback: no evidence -> say so, never fabricate. (Done, no Critic.)
     if not evidence:
         draft = (
             f"# {goal}\n\n"
@@ -58,12 +66,9 @@ def writer(state: AtlasState) -> dict:
             "log": ["Writer: no evidence — wrote an honest 'insufficient' note."],
         }
 
-    llm = config.get_llm()
-    prompt = WRITER_PROMPT.format(
-        goal=goal, evidence_block=truncate(_evidence_block(evidence), 8000)
-    )
+    prompt = _build_prompt(goal, evidence, analysis, critique)
     try:
-        resp = llm.invoke(prompt)
+        resp = config.get_llm().invoke(prompt)
         draft = getattr(resp, "content", "") or ""
     except Exception as err:  # noqa: BLE001  — never crash the pipeline
         print(f"[writer] LLM failed: {type(err).__name__}: {err}")
@@ -81,25 +86,22 @@ def writer(state: AtlasState) -> dict:
         )
 
     note = f"Writer: drafted a brief from {len(evidence)} evidence item(s)."
-    return {"draft": draft, "status": "done", "log": [note]}
+    # Hand off to the Critic for quality-gating.
+    return {"draft": draft, "status": "criticizing", "log": [note]}
 
 
 if __name__ == "__main__":
     # Run the Writer alone with hand-made evidence:  python writer.py
     state = new_state("Is LangGraph a good fit for multi-agent systems?")
     state["evidence"] = [
-        {
-            "claim": "LangGraph models agent workflows as a graph of nodes sharing one state.",
-            "source_url": "https://langchain-ai.github.io/langgraph/",
-            "snippet": "LangGraph is a library for building stateful, multi-actor applications.",
-        },
-        {
-            "claim": "It supports a supervisor pattern where a router delegates to worker agents.",
-            "source_url": "https://langchain-ai.github.io/langgraph/concepts/multi_agent/",
-            "snippet": "A supervisor agent decides which worker to call next.",
-        },
+        {"claim": "LangGraph models agent workflows as a graph of nodes sharing one state.",
+         "source_url": "https://langchain-ai.github.io/langgraph/",
+         "snippet": "LangGraph is a library for building stateful, multi-actor apps."},
+        {"claim": "It supports a supervisor pattern where a router delegates to worker agents.",
+         "source_url": "https://langchain-ai.github.io/langgraph/concepts/multi_agent/",
+         "snippet": "A supervisor agent decides which worker to call next."},
     ]
     out = writer(state)
-    print(out["log"][0])
+    print(out["log"][0], "(status ->", out["status"] + ")")
     print("-" * 60)
     print(out["draft"])

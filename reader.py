@@ -3,13 +3,13 @@ Reader agent — reads the Searcher's raw results and extracts the key FACTS tha
 are relevant to the goal, each tied to its source URL. That (fact + URL) pair is
 our Evidence, and it's what lets the final report cite where every claim came from.
 
-This is where the LLM earns its keep: it distills messy page text into clean,
-sourced claims. If a result has no usable text, the Reader tries to fetch the page
-directly (dead-link fallback) before giving up on that source.
+On a revise-loop it only reads sources it HASN'T read before (so re-searching for
+more evidence doesn't re-process old pages). If a result has no usable text, the
+Reader tries to fetch the page directly (dead-link fallback) before giving up.
 
 CONTRACT
-  reads : state["goal"], state["search_results"]
-  writes: state["evidence"], state["status"], state["log"]
+  reads : state["goal"], state["search_results"], state["evidence"]
+  writes: state["evidence"] (appended), state["status"], state["log"]
 """
 
 from __future__ import annotations
@@ -39,16 +39,23 @@ SOURCE TEXT:
 def reader(state: AtlasState, max_facts_per_source: int = 3) -> dict:
     goal = state.get("goal") or ""
     results = state.get("search_results") or []
+    already_read = {e.get("source_url") for e in (state.get("evidence") or [])}
     llm = config.get_llm()
 
     evidence: list[Evidence] = []
+    new_sources = 0
     for r in results:
+        url = r.get("url", "")
+        if url and url in already_read:
+            continue  # read on a previous pass — skip to avoid duplicate facts
+        new_sources += 1
+
         body = r.get("raw_content") or r.get("content") or ""
         if len(body) < 200:
             # Thin or empty — try fetching the page directly (dead-link fallback).
-            body = tavily_extract(r.get("url", "")) or body
+            body = tavily_extract(url) or body
         if len(body.strip()) < 80:
-            continue  # nothing worth reading here; skip this source
+            continue  # nothing worth reading here
 
         prompt = READER_PROMPT.format(
             goal=goal,
@@ -60,7 +67,7 @@ def reader(state: AtlasState, max_facts_per_source: int = 3) -> dict:
             resp = llm.invoke(prompt)
             facts = extract_json(getattr(resp, "content", "")) or []
         except Exception as err:  # noqa: BLE001
-            print(f"[reader] LLM failed on {r.get('url', '')[:50]}: {type(err).__name__}")
+            print(f"[reader] LLM failed on {url[:50]}: {type(err).__name__}")
             facts = []
 
         if not isinstance(facts, list):
@@ -70,22 +77,23 @@ def reader(state: AtlasState, max_facts_per_source: int = 3) -> dict:
                 evidence.append(
                     {
                         "claim": str(f["claim"]).strip(),
-                        "source_url": r.get("url", ""),
+                        "source_url": url,
                         "snippet": str(f.get("snippet", "")).strip()[:200],
                     }
                 )
 
-    status = "writing" if evidence else "failed"
+    # We can move on to analysis if we have ANY evidence (new or from before).
+    has_any = bool(evidence) or bool(state.get("evidence"))
+    status = "analyzing" if has_any else "failed"
     note = (
-        f"Reader: extracted {len(evidence)} sourced fact(s) "
-        f"from {len(results)} source(s)."
+        f"Reader: extracted {len(evidence)} new fact(s) "
+        f"from {new_sources} new source(s)."
     )
     return {"evidence": evidence, "status": status, "log": [note]}
 
 
 if __name__ == "__main__":
     # Run the Reader alone:  python reader.py
-    # (We do a tiny real search first so the Reader has something to read.)
     from tools import tavily_search
 
     goal = "What is LangGraph's supervisor multi-agent pattern?"
@@ -96,4 +104,3 @@ if __name__ == "__main__":
     for i, e in enumerate(out["evidence"], 1):
         print(f"{i}. {e['claim']}")
         print(f"   source : {e['source_url']}")
-        print(f"   snippet: {e['snippet'][:90]}")

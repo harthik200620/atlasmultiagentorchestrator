@@ -9,9 +9,9 @@ How a key merges is decided by its *reducer*:
   - No reducer   -> the new value REPLACES the old one        (e.g. `draft`)
   - `add` reducer-> the new value is APPENDED to the old list (e.g. `evidence`)
 
-(Phase 1 note: we use a simple `log` list of strings for the activity feed
-instead of a chat-message thread — Atlas is a PIPELINE of agents, not a chatbot.
-The Phase 6 UI will show this log live as each agent works.)
+(Phase 1 note: we use a simple `log` list of strings for the activity feed.)
+(Phase 3 note: added `analysis`, plus `revisions`/`revise_queries` to drive the
+Critic's revise-loop.)
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from __future__ import annotations
 from operator import add
 from typing import Annotated, Literal, TypedDict
 
-# The supervisor (Phase 2) reads `status` to decide which worker runs next.
+# The supervisor reads `status` to decide which worker runs next.
 Status = Literal[
     "planning",     # Planner is about to break the goal into steps
     "searching",    # Searcher is querying Tavily
@@ -74,14 +74,17 @@ class AtlasState(TypedDict, total=False):
     search_results: Annotated[list[SearchResult], add]
     evidence: Annotated[list[Evidence], add]
 
-    # --- writing & review (REPLACED each time, no reducer) ---
+    # --- synthesis, writing & review (REPLACED each time, no reducer) ---
+    analysis: str                                   # Analyst's synthesis
     draft: str                                      # current report draft
     critique: str                                   # Critic's latest feedback
 
     # --- control flow ---
     status: Status                                  # where we are in the pipeline
     next_agent: str                                 # supervisor's routing decision
-    iterations: int                                 # loop counter vs MAX_ITERATIONS
+    iterations: int                                 # total supervisor visits
+    revisions: int                                  # Critic-triggered revise rounds
+    revise_queries: list[str]                       # extra searches the Critic asked for
 
 
 def new_state(goal: str) -> AtlasState:
@@ -92,11 +95,14 @@ def new_state(goal: str) -> AtlasState:
         "log": [],
         "search_results": [],
         "evidence": [],
+        "analysis": "",
         "draft": "",
         "critique": "",
         "status": "planning",
         "next_agent": "planner",
         "iterations": 0,
+        "revisions": 0,
+        "revise_queries": [],
     }
 
 
@@ -105,7 +111,6 @@ if __name__ == "__main__":
     s = new_state("Compare LangGraph and CrewAI for building multi-agent apps.")
     print("Created AtlasState with keys:")
     print("  " + ", ".join(s.keys()))
-    print(f"goal       : {s['goal']}")
     print(f"status     : {s['status']}")
     print(f"next_agent : {s['next_agent']}")
     print("OK  state.py imports and builds a fresh state correctly.")
