@@ -21,12 +21,14 @@ import re
 import sys
 import threading
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load variables from a local .env file into the environment.
-# Real OS environment variables take precedence (handy in deployment).
-load_dotenv()
+# Load atlas/.env (next to this file) so Atlas works no matter what directory
+# you launch from. Real OS env vars still take precedence (handy in deployment,
+# where you set vars instead of shipping a .env file).
+load_dotenv(Path(__file__).with_name(".env"))
 
 
 # ----------------------------------------------------------------------
