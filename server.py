@@ -10,7 +10,7 @@ import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 import config
 import tracing
@@ -31,8 +31,19 @@ app.add_middleware(
 _graph = build_graph()
 
 
+_INDEX_HTML = os.path.join(os.path.dirname(__file__), "static", "index.html")
+
+
 @app.get("/")
 def root():
+    # Serve the bundled web UI so a single Render host shows the app, not raw JSON.
+    if os.path.exists(_INDEX_HTML):
+        return FileResponse(_INDEX_HTML)
+    return {"service": "atlas", "docs": "/docs", "research": "/research?goal=..."}
+
+
+@app.get("/api")
+def api_info():
     return {"service": "atlas", "docs": "/docs", "research": "/research?goal=..."}
 
 
