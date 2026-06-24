@@ -1,107 +1,187 @@
-# Atlas — a multi-agent research orchestrator
+# 🧭 Atlas — a multi-agent research orchestrator
 
-Atlas takes a research goal — *"Compare X and Y"*, *"What's the state of Z in 2026?"* —
-and runs a **team of specialized AI agents** that plan, search the web, read sources,
-synthesize findings, write a **cited** brief, and critique it until it's good enough.
+Atlas turns a research goal — *"Compare X and Y"*, *"What's the state of Z in 2026?"* —
+into a **cited research brief**, produced by a team of specialized AI agents that plan,
+search the web, read sources, synthesize, write, and **critique their own work** until it
+meets a quality bar.
 
-Built with **LangGraph** using the **supervisor / multi-agent** pattern.
+Built with **LangGraph** (custom **supervisor** multi-agent pattern), a **FastAPI**
+streaming backend, and a **Next.js** frontend.
+
+> **Live demo:** frontend on Vercel · API on Render — _add your URLs here once deployed._
 
 ---
 
-## The idea (multi-agent, in one picture)
+## Why it's interesting
+
+- **A real multi-agent system**, not one big prompt — a supervisor routes between six
+  specialized agents over a shared state.
+- **Every claim is sourced.** The brief cites a URL for each fact; when evidence is thin,
+  Atlas says so instead of bluffing.
+- **Self-correcting.** A Critic agent reviews each draft and can send it back for more
+  research or a rewrite, bounded by a revision cap.
+- **Production-shaped.** Distributed tracing (Langfuse), an automated evaluation
+  (40 goals, LLM-as-judge), API-key rotation with failover, and a deployable
+  frontend/backend split.
+
+---
+
+## Architecture
+
+### The agent graph (supervisor pattern)
 
 ```
-            ┌─────────────┐
-   goal ──▶ │ SUPERVISOR  │ ◀──────────  shared STATE  ──────────┐
-            │  (router)   │     goal, plan, evidence, draft …     │
-            └──────┬──────┘                                       │
-                   │  picks the next worker based on `status`     │
-   ┌───────┬───────┼────────┬─────────┬─────────┐                 │
-   ▼       ▼       ▼        ▼         ▼         ▼                 │
- Planner Searcher Reader  Analyst   Writer    Critic ─────────────┘
- (steps) (Tavily) (facts) (synth)  (draft)  (approve / send back)
+            +-------------+
+   goal --> | SUPERVISOR  | <-------- shared STATE ---------+
+            |  (router)   |   goal, plan, evidence, draft   |
+            +------+------+                                 |
+                   |  routes by `status` (+ revise-loop)    |
+   +-------+-------+--------+---------+----------+           |
+   v       v       v        v         v          v          |
+ Planner Searcher Reader  Analyst   Writer     Critic ------+
+(queries)(Tavily) (facts) (synth) (cited draft)(approve/revise)
 ```
 
-- **Shared state** — one object every agent reads and writes (`state.py`).
-- **Supervisor** — inspects the state and routes to the next worker, with a hard
-  iteration cap so it can never loop forever (`supervisor.py`, Phase 2+).
-- **Workers** — small single-purpose agents: Planner, Searcher, Reader, Analyst,
-  Writer, Critic.
-- **Critic loop** — the Critic either approves the draft or sends it back with
-  feedback; the supervisor revises until approved or capped.
-- **Sourcing rule** — every claim in the final report cites a source URL; if
-  evidence is thin, Atlas says so honestly.
+The Critic can route back to the **Searcher** (gather more evidence) or the **Writer**
+(rewrite); the supervisor loops until the Critic approves or `MAX_ITERATIONS` revisions
+are used. Only the supervisor makes routing decisions — workers just do one job and report
+back.
+
+### Deployment (why two hosts)
+
+```
+  Browser --> Next.js (Vercel)  --SSE-->  FastAPI + agents (Render)  --> Gemini / Tavily
+```
+
+The agent backend runs 45 s–2 min per request with heavy dependencies — too long and too
+large for Vercel's serverless functions — so it lives on a persistent host (Render).
+Vercel serves the fast static frontend.
 
 ---
 
 ## Tech stack
 
-| Concern        | Tool                                                  |
-|----------------|-------------------------------------------------------|
-| Orchestration  | LangGraph (custom supervisor pattern)                 |
-| LLM            | Gemini 2.5 Flash (swappable → gpt-4o-mini / Claude)   |
-| Web search     | Tavily (search + page extraction)                     |
-| Tracing        | Langfuse                                              |
-| Evaluation     | 40-goal test set + LLM-as-judge                       |
-| UI             | Streamlit                                             |
+| Concern        | Tool |
+|----------------|------|
+| Orchestration  | LangGraph (custom supervisor pattern) |
+| LLM            | Gemini 2.5 Flash (swappable → GPT-4o-mini / Claude) |
+| Web search     | Tavily (search + page extraction) |
+| Backend API    | FastAPI + Uvicorn (SSE streaming) |
+| Frontend       | Next.js (App Router) + react-markdown |
+| Tracing        | Langfuse |
+| Evaluation     | 40-goal test set + LLM-as-judge |
 
 ---
 
-## Setup
+## How it works (the pipeline)
 
-1. **Python 3.11** + a virtual environment (already created in `.venv` if you used the build steps):
-   ```powershell
-   py -V:Astral/CPython3.11.15 -m venv .venv      # Windows (this machine)
-   .\.venv\Scripts\Activate.ps1                    # activate (PowerShell)
-   # source .venv/bin/activate                     # macOS / Linux
-   ```
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **Add your keys:** copy the template and fill it in.
-   ```powershell
-   Copy-Item .env.example .env
-   ```
-   You'll need a `TAVILY_API_KEY` and one LLM key (`GOOGLE_API_KEY` by default).
-   Get them free at: [Tavily](https://tavily.com) · [Google AI Studio](https://aistudio.google.com/apikey).
-4. **Verify your setup:**
-   ```bash
-   python config.py        # prints config + which keys are present
-   python state.py         # smoke-tests the shared state
-   ```
+1. **Planner** — breaks the goal into 3–5 focused search queries.
+2. **Searcher** — runs them through Tavily and de-dupes sources.
+3. **Reader** — extracts sourced **facts** (claim + URL) from each page (LLM).
+4. **Analyst** — synthesizes the evidence: themes, contradictions, gaps.
+5. **Writer** — writes a cited Markdown brief from the analysis.
+6. **Critic** — approves, or sends it back with feedback / new queries.
+
+All six share one `AtlasState`; the **supervisor** is the single decision point.
 
 ---
 
-## Project layout
+## Repository layout
 
 ```
 atlas/
-├── config.py          # all env/config in one place + the LLM factory
-├── state.py           # the shared AtlasState (the "blackboard")
+├── config.py        # env/config + LLM factory + rotating Gemini key pool
+├── state.py         # AtlasState (the shared blackboard) + reducers
+├── tools.py         # Tavily search + extract (retries, graceful degrade)
+├── utils.py         # JSON rescue, truncation, evidence formatting
+├── planner.py  searcher.py  reader.py  analyst.py  writer.py  critic.py
+├── supervisor.py    # the router + revise-loop + safety cap
+├── graph.py         # LangGraph wiring + CLI:  python graph.py "your goal"
+├── tracing.py       # optional Langfuse tracing
+├── evaluate.py      # LLM-as-judge evaluation over...
+├── eval_goals.py    # ...40 varied research goals
+├── server.py        # FastAPI backend (SSE) for the web UI
+├── render.yaml      # Render deploy config (backend)
 ├── requirements.txt
-├── .env.example       # template — copy to .env (which is gitignored)
-├── .gitignore
-└── README.md
+└── web/             # Next.js frontend (deploys to Vercel)
+    └── app/page.js  # UI: live agent steps + the cited brief
 ```
-More files arrive each phase: `tools.py`, the worker agents, `supervisor.py`,
-`graph.py`, `evaluate.py`, `app.py`.
 
 ---
 
-## Build progress
+## Run it locally
 
-- [x] **Phase 0** — repo, config, shared state, git. *(done)*
-- [ ] **Phase 1** — tools + Searcher / Reader / Writer agents (each runnable alone).
-- [ ] **Phase 2** — minimal supervisor graph (Planner → Searcher → Reader → Writer) + CLI.
-- [ ] **Phase 3** — Analyst + Critic + revise-loop + retries/memory.
-- [ ] **Phase 4** — Langfuse tracing.
-- [ ] **Phase 5** — `evaluate.py` (40 goals, LLM-as-judge) + success rate.
-- [ ] **Phase 6** — Streamlit UI + final writeup.
+**Backend** (Python 3.11):
+
+```powershell
+python -m venv .venv ; .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env       # then fill in your keys
+python config.py check-keys       # verify the keys are live
+python -m uvicorn server:app --port 8000
+```
+
+Run a single research from the CLI instead:
+`python graph.py "Compare LangGraph and CrewAI for multi-agent systems"`
+
+**Frontend** (Node 18+):
+
+```powershell
+cd web
+npm install
+Copy-Item .env.local.example .env.local    # points at http://127.0.0.1:8000
+npm run dev                                 # open http://localhost:3000
+```
+
+### Keys you need (all have free tiers)
+
+`TAVILY_API_KEY` (search) and a Gemini key — `GOOGLE_API_KEY` or numbered
+`GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, … (multiple keys from different Google projects
+**rotate** for higher free-tier throughput). `LANGFUSE_*` is optional (tracing).
 
 ---
 
-## My result
+## Evaluation
 
-> Atlas scored **__ / 40  (= __%)** task-success on the LLM-as-judge eval.
-> _(Filled in at Phase 5 — this is the number for your resume.)_
+```powershell
+python -u evaluate.py             # all 40 goals -> results/eval_results.json + a score
+python -u evaluate.py --limit 5   # a quick subset first
+```
+
+An LLM-as-judge scores each brief 1–5 (does it answer the goal? is it well-sourced?);
+`success = score >= 4`. Every verdict's reasoning is saved alongside the score.
+
+**Result:** **__ / 40  (= __%)** task-success.  ← _run the eval and paste your number here._
+
+---
+
+## Deploy
+
+**Backend → Render**
+New ► **Blueprint** ► import this repo (`render.yaml` is auto-detected) ► in the service's
+**Environment** tab add your secrets (`GEMINI_API_KEY_*`, `TAVILY_API_KEY`, `LANGFUSE_*`) ►
+deploy ► copy the URL.
+
+**Frontend → Vercel**
+Add New ► **Project** ► import this repo ► **set Root Directory to `web`** ► add an env var
+`NEXT_PUBLIC_API_URL` = your Render URL ► deploy.
+_(`NEXT_PUBLIC_*` is baked in at build time, so set it before building or redeploy after.
+For tighter CORS, set `ALLOWED_ORIGINS` on Render to your Vercel URL.)_
+
+---
+
+## Engineering notes (things that bit, and the fixes)
+
+- **Key rotation + fast failover.** Free-tier Gemini limits are low, so `RotatingGemini`
+  round-robins across N keys and fails over on HTTP 429. The key detail: set the client's
+  `max_retries=0` so a throttled key fails *immediately* to the next one instead of backing
+  off ~60 s on the same key first — this alone cut per-goal eval time roughly **13×**.
+- **Thinking off for speed.** `thinking_budget=0` on Gemini 2.5 Flash dropped per-call
+  latency from ~24 s to ~2 s.
+- **Streaming + tracing across threads.** Starlette drives the SSE generator across
+  threadpool threads, which broke Langfuse's thread-local span context. Fix: run the agent
+  in one dedicated worker thread and pipe its log lines out through a queue.
+
+---
+
+_Built phase by phase as a learning project — LangGraph supervisor pattern, end to end._
