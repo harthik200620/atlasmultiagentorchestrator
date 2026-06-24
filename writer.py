@@ -62,8 +62,23 @@ def writer(state: AtlasState) -> dict:
     prompt = WRITER_PROMPT.format(
         goal=goal, evidence_block=truncate(_evidence_block(evidence), 8000)
     )
-    resp = llm.invoke(prompt)
-    draft = getattr(resp, "content", "") or ""
+    try:
+        resp = llm.invoke(prompt)
+        draft = getattr(resp, "content", "") or ""
+    except Exception as err:  # noqa: BLE001  — never crash the pipeline
+        print(f"[writer] LLM failed: {type(err).__name__}: {err}")
+        draft = ""
+
+    if not draft.strip():
+        # Fallback: still hand back the sourced facts we gathered.
+        bullets = "\n".join(
+            f"- {e['claim']} ([source]({e['source_url']}))" for e in evidence
+        )
+        draft = (
+            f"# {goal}\n\n"
+            "_(Auto-summary unavailable; listing the gathered evidence.)_\n\n"
+            f"{bullets}"
+        )
 
     note = f"Writer: drafted a brief from {len(evidence)} evidence item(s)."
     return {"draft": draft, "status": "done", "log": [note]}

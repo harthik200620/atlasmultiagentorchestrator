@@ -16,21 +16,27 @@ from state import AtlasState, new_state
 from tools import tavily_search
 
 
-def searcher(state: AtlasState) -> dict:
+def searcher(state: AtlasState, max_sources: int = 8) -> dict:
     goal = (state.get("goal") or "").strip()
     plan = state.get("plan") or []
 
     # Search each plan step if we have a plan; otherwise search the goal itself.
     queries = [q for q in (plan if plan else [goal]) if q and q.strip()]
 
+    # Cap the total sources so the Reader's per-source LLM calls stay bounded
+    # now that the Planner can hand us several queries.
     results = []
     seen_urls = set()
     for query in queries:
+        if len(results) >= max_sources:
+            break
         for hit in tavily_search(query):
             url = hit["url"]
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 results.append(hit)
+                if len(results) >= max_sources:
+                    break
 
     # If we found nothing at all, flag failure so the supervisor can react later.
     status = "reading" if results else "failed"
