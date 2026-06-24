@@ -204,18 +204,10 @@ class RotatingGemini(Runnable):
 # ----------------------------------------------------------------------
 # LLM factory  — every agent gets its model from here
 # ----------------------------------------------------------------------
-def get_llm(model: str | None = None, temperature: float | None = None):
-    """Return the chat model Atlas should use, based on LLM_PROVIDER.
+_LLM_CACHE: dict = {}
 
-    * google    -> a RotatingGemini pool (auto key-rotation + failover)
-    * openai    -> standard ChatOpenAI
-    * anthropic -> standard ChatAnthropic
 
-    Provider SDKs are imported lazily so you only need the one you use.
-    """
-    model = model or LLM_MODEL
-    temperature = LLM_TEMPERATURE if temperature is None else temperature
-
+def _build_llm(model: str, temperature: float):
     if LLM_PROVIDER == "google":
         return RotatingGemini.from_keys(gemini_keys(), model, temperature)
 
@@ -234,6 +226,26 @@ def get_llm(model: str | None = None, temperature: float | None = None):
     raise ValueError(
         f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}. Use: google | openai | anthropic."
     )
+
+
+def get_llm(model: str | None = None, temperature: float | None = None):
+    """Return the chat model Atlas should use, based on LLM_PROVIDER.
+
+    * google    -> a RotatingGemini pool (auto key-rotation + failover)
+    * openai    -> standard ChatOpenAI
+    * anthropic -> standard ChatAnthropic
+
+    The model is built ONCE and cached, so the rotating key-pool's round-robin
+    index persists across every agent call and every eval run (instead of
+    resetting to the first key each time). Provider SDKs are imported lazily.
+    """
+    cache_key = (
+        model or LLM_MODEL,
+        LLM_TEMPERATURE if temperature is None else temperature,
+    )
+    if cache_key not in _LLM_CACHE:
+        _LLM_CACHE[cache_key] = _build_llm(*cache_key)
+    return _LLM_CACHE[cache_key]
 
 
 # ----------------------------------------------------------------------

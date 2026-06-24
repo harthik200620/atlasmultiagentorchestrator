@@ -9,8 +9,9 @@ How a key merges is decided by its *reducer*:
   - No reducer   -> the new value REPLACES the old one        (e.g. `draft`)
   - `add` reducer-> the new value is APPENDED to the old list (e.g. `evidence`)
 
-This file only DEFINES the shape of the state. The agents that fill it in and the
-graph that passes it around arrive in later phases.
+(Phase 1 note: we use a simple `log` list of strings for the activity feed
+instead of a chat-message thread — Atlas is a PIPELINE of agents, not a chatbot.
+The Phase 6 UI will show this log live as each agent works.)
 """
 
 from __future__ import annotations
@@ -18,9 +19,7 @@ from __future__ import annotations
 from operator import add
 from typing import Annotated, Literal, TypedDict
 
-from langgraph.graph.message import add_messages
-
-# The supervisor reads `status` to decide which worker runs next.
+# The supervisor (Phase 2) reads `status` to decide which worker runs next.
 Status = Literal[
     "planning",     # Planner is about to break the goal into steps
     "searching",    # Searcher is querying Tavily
@@ -29,8 +28,8 @@ Status = Literal[
     "writing",      # Writer is drafting the report
     "criticizing",  # Critic is quality-gating the draft
     "revise",       # Critic rejected — loop back and improve
-    "done",         # Critic approved — we're finished
-    "failed",       # unrecoverable error (e.g. all searches failed)
+    "done",         # finished
+    "failed",       # unrecoverable (e.g. no sources found at all)
 ]
 
 
@@ -68,8 +67,8 @@ class AtlasState(TypedDict, total=False):
     # --- Planner output ---
     plan: list[str]                                 # ordered research sub-steps
 
-    # --- running log of agent messages (APPENDED via add_messages) ---
-    messages: Annotated[list, add_messages]
+    # --- human-readable activity log (APPENDED via `add`; shown in the UI) ---
+    log: Annotated[list[str], add]
 
     # --- material gathered as agents work (APPENDED via `add`) ---
     search_results: Annotated[list[SearchResult], add]
@@ -90,7 +89,7 @@ def new_state(goal: str) -> AtlasState:
     return {
         "goal": goal,
         "plan": [],
-        "messages": [],
+        "log": [],
         "search_results": [],
         "evidence": [],
         "draft": "",
@@ -109,5 +108,4 @@ if __name__ == "__main__":
     print(f"goal       : {s['goal']}")
     print(f"status     : {s['status']}")
     print(f"next_agent : {s['next_agent']}")
-    print(f"iterations : {s['iterations']}")
     print("OK  state.py imports and builds a fresh state correctly.")
