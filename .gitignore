@@ -1,0 +1,26 @@
+# --- Secrets: NEVER commit these ---
+.env
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Tooling / OS noise ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Streamlit secrets (Phase 6) ---
+.streamlit/secrets.toml
+
+# --- Local run outputs (uncomment to ignore large eval dumps) ---
+# results/
